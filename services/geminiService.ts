@@ -3,36 +3,28 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { LookupResult } from "../types";
 
 export const performLookup = async (phoneNumber: string): Promise<LookupResult> => {
-  // Ultra-safe way to access environment variables in Vercel/Browser environments
-  let apiKey: string | undefined;
+  // Accessing the API key from environment variables
+  const apiKey = process.env.API_KEY;
   
-  try {
-    // Try accessing via process.env (standard for many bundlers)
-    apiKey = process.env.API_KEY;
-  } catch (e) {
-    // Fallback if process is not defined
-    console.warn("process.env not accessible, checking alternative providers");
-  }
-
   if (!apiKey) {
-    throw new Error("API_KEY not found. Please add it to your Vercel Environment Variables.");
+    throw new Error("API_KEY খুঁজে পাওয়া যায়নি। দয়া করে Vercel-এর Settings > Environment Variables-এ গিয়ে 'API_KEY' যোগ করুন।");
   }
 
   const ai = new GoogleGenAI({ apiKey });
   
-  const prompt = `SEARCH REQUEST: Identify details for phone number "${phoneNumber}".
-Find:
-1. "name": Common Caller ID / Display Name.
-2. "adminName": Registered owner's legal name.
-3. "city": Precise city location.
-4. "location": Region/Country.
-5. "carrier": Network provider.
-6. "type": Mobile/Landline/VoIP.
-7. "summary": Brief insight.
-8. "confidence": "High", "Medium", or "Low".
+  const prompt = `You are a professional global phone number investigator. 
+Perform a deep search for the number: "${phoneNumber}".
 
-Social check: WhatsApp and Telegram status.
-Return ONLY a valid JSON object.`;
+Your goal is to find:
+1. The most common display name (Caller ID from public records).
+2. The legal name of the registered owner/admin if available.
+3. The specific city or town where this number is registered.
+4. The country and region.
+5. The mobile network carrier name.
+6. Check if this number is likely active on WhatsApp or Telegram.
+
+Provide a high-quality summary of your findings.
+MANDATORY: Return the results in JSON format only. If some details are private, return "Not Disclosed".`;
 
   try {
     const response = await ai.models.generateContent({
@@ -82,27 +74,18 @@ Return ONLY a valid JSON object.`;
       }
     });
 
-    const text = response.text;
-    if (!text) throw new Error("Empty response from intelligence engine.");
-
-    // Resilient JSON extraction
-    let cleanJson = text;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      cleanJson = jsonMatch[0];
-    }
-
-    const data = JSON.parse(cleanJson);
+    const resultText = response.text || "{}";
+    const data = JSON.parse(resultText);
     
-    // Process grounding sources safely
+    // Extract search sources for transparency
     const sources: Array<{title: string, uri: string}> = [];
-    const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
     
-    if (groundingMetadata?.groundingChunks) {
-      groundingMetadata.groundingChunks.forEach((chunk: any) => {
+    if (groundingChunks) {
+      groundingChunks.forEach((chunk: any) => {
         if (chunk.web?.uri) {
           sources.push({
-            title: chunk.web.title || "Reference Link",
+            title: chunk.web.title || "Public Record Source",
             uri: chunk.web.uri
           });
         }
@@ -115,7 +98,7 @@ Return ONLY a valid JSON object.`;
       sources
     };
   } catch (error: any) {
-    console.error("Service Error:", error);
-    throw new Error(error.message || "The global tracking system encountered a network error.");
+    console.error("Lookup Error:", error);
+    throw new Error(error.message || "সার্ভারে সমস্যা হচ্ছে। দয়া করে একটু পর আবার চেষ্টা করুন।");
   }
 };
