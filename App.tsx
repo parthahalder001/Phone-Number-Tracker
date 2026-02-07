@@ -33,18 +33,19 @@ const App: React.FC = () => {
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!phoneNumber.trim()) return;
+    const formattedNumber = phoneNumber.trim();
+    if (!formattedNumber) return;
 
     setState({ ...state, loading: true, error: null, result: null });
     
     try {
-      const data = await performLookup(phoneNumber);
+      const data = await performLookup(formattedNumber);
       setState({ loading: false, error: null, result: data });
     } catch (err: any) {
-      console.error(err);
+      console.error("Search Error:", err);
       setState({ 
         loading: false, 
-        error: "Search failed. Make sure to use international format (e.g., +88017...).", 
+        error: err.message || "Search failed. Check international format (e.g., +88017...).", 
         result: null 
       });
     }
@@ -110,7 +111,10 @@ const App: React.FC = () => {
         {state.error && (
           <div className="mt-8 p-5 bg-red-500/10 border border-red-500/20 rounded-[2rem] flex items-start gap-4 text-red-400">
             <AlertTriangle className="w-6 h-6 shrink-0" />
-            <p className="font-bold uppercase tracking-tight text-sm">{state.error}</p>
+            <div className="flex flex-col gap-1">
+              <p className="font-bold uppercase tracking-tight text-sm">Operation Failed</p>
+              <p className="text-xs opacity-80">{state.error}</p>
+            </div>
           </div>
         )}
       </section>
@@ -146,7 +150,7 @@ const App: React.FC = () => {
                     <p className="text-3xl font-black text-white leading-tight tracking-tight">
                       {state.result.adminName}
                     </p>
-                    <p className="text-[10px] text-gray-400 mt-3 uppercase tracking-widest italic font-bold">Encrypted Carrier Metadata Matched</p>
+                    <p className="text-[10px] text-gray-500 mt-3 uppercase tracking-widest italic font-bold">Encrypted Carrier Metadata Matched</p>
                   </div>
                 </div>
 
