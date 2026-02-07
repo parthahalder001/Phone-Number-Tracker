@@ -3,30 +3,36 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { LookupResult } from "../types";
 
 export const performLookup = async (phoneNumber: string): Promise<LookupResult> => {
-  // Safe environment variable access for browser/Vercel environments
-  const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : undefined;
+  // Ultra-safe way to access environment variables in Vercel/Browser environments
+  let apiKey: string | undefined;
   
+  try {
+    // Try accessing via process.env (standard for many bundlers)
+    apiKey = process.env.API_KEY;
+  } catch (e) {
+    // Fallback if process is not defined
+    console.warn("process.env not accessible, checking alternative providers");
+  }
+
   if (!apiKey) {
-    throw new Error("API_KEY is missing. Please configure it in your environment settings.");
+    throw new Error("API_KEY not found. Please add it to your Vercel Environment Variables.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
   
-  const prompt = `DEEP INTELLIGENCE SEARCH for Phone Number: "${phoneNumber}"
+  const prompt = `SEARCH REQUEST: Identify details for phone number "${phoneNumber}".
+Find:
+1. "name": Common Caller ID / Display Name.
+2. "adminName": Registered owner's legal name.
+3. "city": Precise city location.
+4. "location": Region/Country.
+5. "carrier": Network provider.
+6. "type": Mobile/Landline/VoIP.
+7. "summary": Brief insight.
+8. "confidence": "High", "Medium", or "Low".
 
-OBJECTIVE:
-You are a world-class OSINT investigator. Your task is to find the IDENTITY and precise LOCATION of this phone number by scanning global directories and carrier metadata.
-
-SEARCH TASKS:
-1. Identify "Display Name" (e.g., Caller ID from Truecaller/Whoscall).
-2. Identify "Admin Name" (Legal/Registered owner).
-3. Identify "City/Town" and "Carrier" (e.g., Dhaka, Grameenphone).
-4. Verify presence on WhatsApp and Telegram.
-
-EXTRACTION RULES:
-- "confidence" MUST be exactly one of: "High", "Medium", or "Low".
-- If specific data isn't found, use "Private Record" or "Not Disclosed" rather than null.
-- RETURN ONLY VALID JSON.`;
+Social check: WhatsApp and Telegram status.
+Return ONLY a valid JSON object.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -45,7 +51,7 @@ EXTRACTION RULES:
             carrier: { type: Type.STRING },
             type: { type: Type.STRING },
             summary: { type: Type.STRING },
-            confidence: { type: Type.STRING, description: "Must be High, Medium, or Low" },
+            confidence: { type: Type.STRING },
             socialPresence: {
               type: Type.OBJECT,
               properties: {
@@ -76,30 +82,27 @@ EXTRACTION RULES:
       }
     });
 
-    // Robust JSON extraction from the model's text response
-    const rawText = response.text || "";
-    if (!rawText) throw new Error("No intelligence data returned from the core.");
+    const text = response.text;
+    if (!text) throw new Error("Empty response from intelligence engine.");
 
-    let data;
-    try {
-      // Find JSON block if model wrapped it in markdown
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      const jsonString = jsonMatch ? jsonMatch[0] : rawText;
-      data = JSON.parse(jsonString);
-    } catch (parseError) {
-      console.error("JSON Parsing failed:", rawText);
-      throw new Error("Failed to interpret search results. Please try again.");
+    // Resilient JSON extraction
+    let cleanJson = text;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      cleanJson = jsonMatch[0];
     }
 
-    // Safely extract grounding sources
-    const sources: Array<{title: string, uri: string}> = [];
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+    const data = JSON.parse(cleanJson);
     
-    if (Array.isArray(chunks)) {
-      chunks.forEach((chunk: any) => {
-        if (chunk.web?.uri && chunk.web?.title) {
+    // Process grounding sources safely
+    const sources: Array<{title: string, uri: string}> = [];
+    const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
+    
+    if (groundingMetadata?.groundingChunks) {
+      groundingMetadata.groundingChunks.forEach((chunk: any) => {
+        if (chunk.web?.uri) {
           sources.push({
-            title: chunk.web.title,
+            title: chunk.web.title || "Reference Link",
             uri: chunk.web.uri
           });
         }
@@ -109,11 +112,10 @@ EXTRACTION RULES:
     return {
       phoneNumber,
       ...data,
-      sources: sources.slice(0, 5) // Limit to top 5 sources
+      sources
     };
   } catch (error: any) {
-    console.error("Lookup Service Error:", error);
-    // Return a user-friendly error message
-    throw new Error(error.message || "An unexpected error occurred during global tracking.");
+    console.error("Service Error:", error);
+    throw new Error(error.message || "The global tracking system encountered a network error.");
   }
 };
